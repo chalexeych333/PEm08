@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Анализ конкурентов</title>
+  <style>
+    body { font-family: Inter, system-ui, sans-serif; margin: 0; padding: 0; background: #f4f7fb; color: #111; }
+    .container { max-width: 920px; margin: 40px auto; padding: 24px; background: #fff; box-shadow: 0 18px 60px rgba(14, 30, 37, 0.08); border-radius: 24px; }
+    h1 { margin: 0 0 16px; font-size: 2rem; }
+    .row { display: grid; gap: 16px; }
+    .card { padding: 20px; border: 1px solid #e7edf4; border-radius: 18px; background: #fcfdff; }
+    textarea, input, button { width: 100%; font: inherit; }
+    textarea { min-height: 160px; padding: 14px; resize: vertical; border: 1px solid #d8e1ea; border-radius: 14px; }
+    button { padding: 14px 18px; border: none; border-radius: 14px; background: #2563eb; color: #fff; cursor: pointer; transition: background .2s ease; }
+    button:hover { background: #1d4ed8; }
+    .results { white-space: pre-wrap; word-break: break-word; color: #111827; }
+    .progress { margin-top: 18px; }
+    .progress__bar { width: 100%; height: 14px; background: #e2e8f0; border-radius: 999px; overflow: hidden; }
+    .progress__fill { width: 0%; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #3b82f6, #2563eb); transition: width 0.2s ease; }
+    .progress__text { margin-top: 10px; font-size: 0.95rem; color: #475569; }
+    .flex { display: flex; gap: 14px; flex-wrap: wrap; }
+    .flex > * { flex: 1 1 240px; }
+    .small { font-size: 0.94rem; color: #64748b; }
+    .section { margin-top: 18px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Анализ конкурентов</h1>
+    <div class="row">
+      <div class="card">
+        <p class="small">Введите текст для анализа конкурента</p>
+        <textarea id="textInput" placeholder="Описание конкурентного сайта, товара или рекламного текста..."></textarea>
+        <button id="analyzeText">Проанализировать текст</button>
+      </div>
+      <div class="card">
+        <p class="small">Загрузите изображение и добавьте короткое описание</p>
+        <form id="imageForm">
+          <input type="text" id="imageDescription" placeholder="Описание изображения" />
+          <input type="file" id="imageFile" accept="image/*" />
+          <button type="submit">Проанализировать изображение</button>
+        </form>
+      </div>
+      <div class="card">
+        <p class="small">Анализ сайта по ссылке</p>
+        <input id="parseUrl" type="url" placeholder="https://example.com" />
+        <button id="parseButton">Собрать и проанализировать</button>
+      </div>
+      <div class="card">
+        <p class="small">Анализ всех ссылок из data/Links.txt</p>
+        <button id="analyzeLinksButton">Проанализировать все ссылки</button>
+      </div>
+    </div>
+
+    <div class="card section">
+      <h2>Результат</h2>
+      <div class="progress">
+        <div class="progress__bar"><div id="progressFill" class="progress__fill"></div></div>
+        <div id="progressText" class="progress__text">Готово</div>
+      </div>
+      <div id="result" class="results">Здесь будут ответы от сервера.</div>
+    </div>
+
+    <div class="card section">
+      <h2>История запросов</h2>
+      <button id="refreshHistory">Обновить историю</button>
+      <div id="history" class="results">История пока пуста.</div>
+    </div>
+  </div>
+
+  <script>
+    async function postJson(url, data) {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      return response.json();
+    }
+
+    async function updateHistory() {
+      const response = await fetch('/history');
+      const data = await response.json();
+      const list = data.history || [];
+      document.getElementById('history').textContent = list.map((item, index) => `${index + 1}. [${item.type}] ${item.input}`).join('\n\n') || 'Нет записей.';
+    }
+
+    function renderStructuredResult(result) {
+      if (!result || typeof result !== 'object') {
+        return String(result);
+      }
+
+      const fields = [];
+      if (result.summary) {
+        fields.push(`<div><b>Summary:</b> ${result.summary}</div>`);
+      }
+      if (typeof result.visual_style_score === 'number') {
+        fields.push(`<div><b>visual style score:</b> ${result.visual_style_score} / 10</div>`);
+      }
+      if (result.visual_style_analysis) {
+        fields.push(`<div><b>visual style analysis:</b> ${result.visual_style_analysis}</div>`);
+      }
+      const arrays = ['strengths', 'weaknesses', 'unique_offers', 'marketing_insights', 'recommendations'];
+      arrays.forEach((key) => {
+        if (Array.isArray(result[key]) && result[key].length) {
+          fields.push(`<div><b>${key.replace(/_/g, ' ')}:</b><ul>${result[key].map((item) => `<li>${item}</li>`).join('')}</ul></div>`);
+        }
+      });
+      return fields.length ? fields.join('') : JSON.stringify(result, null, 2);
+    }
+
+    function formatResult(data) {
+      if (!data) return 'Нет данных.';
+      if (data.result_json) {
+        return renderStructuredResult(data.result_json);
+      }
+      if (data.result_text) {
+        try {
+          const parsed = JSON.parse(data.result_text);
+          return renderStructuredResult(parsed);
+        } catch {
+          return String(data.result_text);
+        }
+      }
+      if (data.result) {
+        try {
+          const parsed = JSON.parse(data.result);
+          return renderStructuredResult(parsed);
+        } catch {
+          return String(data.result);
+        }
+      }
+      if (data.error || data.detail) {
+        return `<div><b>Ошибка:</b> ${data.error || data.detail}</div>`;
+      }
+      return JSON.stringify(data, null, 2);
+    }
+
+    function setProgress(value, text) {
+      document.getElementById('progressFill').style.width = `${value}%`;
+      document.getElementById('progressText').textContent = text;
+    }
+
+    function startProgress() {
+      setProgress(10, 'Запуск анализа...');
+      let current = 10;
+      const interval = setInterval(() => {
+        if (current < 90) {
+          current += Math.floor(Math.random() * 10) + 5;
+          if (current > 90) current = 90;
+          setProgress(current, 'Обработка данных...');
+        }
+      }, 300);
+      return () => {
+        clearInterval(interval);
+      };
+    }
+
+    async function performRequest(action) {
+      const stop = startProgress();
+      try {
+        const data = await action();
+        setProgress(100, 'Готово');
+        return data;
+      } catch (error) {
+        setProgress(0, 'Ошибка');
+        document.getElementById('result').textContent = error.message || 'Ошибка запроса';
+        throw error;
+      } finally {
+        stop();
+      }
+    }
+
+    document.getElementById('analyzeText').addEventListener('click', async () => {
+      const text = document.getElementById('textInput').value.trim();
+      if (!text) return alert('Введите текст для анализа');
+      const data = await performRequest(() => postJson('/analyze_text', { text }));
+      document.getElementById('result').innerHTML = formatResult(data);
+      updateHistory();
+    });
+
+    document.getElementById('imageForm').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const description = document.getElementById('imageDescription').value.trim();
+      const fileInput = document.getElementById('imageFile');
+      if (!fileInput.files.length) return alert('Выберите изображение');
+      const formData = new FormData();
+      formData.append('description', description);
+      formData.append('image', fileInput.files[0]);
+      const data = await performRequest(async () => {
+        const response = await fetch('/analyze_image', {
+          method: 'POST',
+          body: formData
+        });
+        return response.json();
+      });
+      document.getElementById('result').innerHTML = formatResult(data);
+      updateHistory();
+    });
+
+    document.getElementById('parseButton').addEventListener('click', async () => {
+      const url = document.getElementById('parseUrl').value.trim();
+      if (!url) return alert('Введите URL');
+      const data = await performRequest(() => postJson('/parse_demo', { url }));
+      document.getElementById('result').innerHTML = formatResult(data);
+      updateHistory();
+    });
+
+    document.getElementById('analyzeLinksButton').addEventListener('click', async () => {
+      const data = await performRequest(() => fetch('/analyze_links', { method: 'POST' }).then((res) => res.json()));
+      if (data.analysis && Array.isArray(data.analysis)) {
+        document.getElementById('result').innerHTML = data.analysis.map((item) => {
+          const content = item.result_json || (() => {
+            try { return JSON.parse(item.result_text || item.result); } catch { return null; }
+          })();
+          return `<div style="margin-bottom:24px;"><h3>${item.url}</h3>${content ? renderStructuredResult(content) : `<pre>${item.error || item.result_text || item.result || 'Нет данных'}</pre>`}</div>`;
+        }).join('');
+      } else {
+        document.getElementById('result').innerHTML = formatResult(data);
+      }
+      updateHistory();
+    });
+
+    document.getElementById('refreshHistory').addEventListener('click', updateHistory);
+    updateHistory();
+  </script>
+</body>
+</html>
